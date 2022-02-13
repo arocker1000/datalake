@@ -5,7 +5,6 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.functions import udf, col
 from pyspark.sql.functions import year, month, dayofmonth, hour, weekofyear, date_format, dayofweek
-import zipfile
 
 # Set spark environments
 # os.environ['PYSPARK_PYTHON'] = 'C:\spark\spark-3.2.1-bin-hadoop3.2'
@@ -13,14 +12,13 @@ import zipfile
 
 config = configparser.ConfigParser()
 config.read('dl.cfg')
-
-os.environ['AWS_ACCESS_KEY_ID']=config['AWS_ACCESS_KEY_ID']
-os.environ['AWS_SECRET_ACCESS_KEY']=config['AWS_SECRET_ACCESS_KEY']
-
+os.environ['AWS_ACCESS_KEY_ID']=config.get("config","AWS_ACCESS_KEY_ID")
+os.environ['AWS_SECRET_ACCESS_KEY']=config.get("config","AWS_SECRET_ACCESS_KEY")
+os.environ['AWS_SESSION_TOKEN']=config.get("config","AWS_SESSION_TOKEN")
 
 def create_spark_session():
     """
-        Connect to spark
+        Create Spark session
     """
     spark = SparkSession \
         .builder \
@@ -36,20 +34,18 @@ def process_song_data(spark, input_data, output_data):
         - Write all dataframe into parquet files in folder 'data_output'
     """
     # get filepath to song data file
-    song_data = os.path.join(input_data, 'song-data',
-                             'song_data', '*', '*', '*')
-    with zipfile.ZipFile("data/song-data.zip", "r") as zip_ref:
-        zip_ref.extractall("data/song-data")
-#     song_data = "input_data/song-data/*/*/*"
-    # read song data file
+    # song_data = os.path.join(input_data, 'song-data', '*', '*', '*')
+    song_data = input_data + 'song_data/*/*/*/*.json'
     df = spark.read.json(song_data)
     # extract columns to create songs table
     songs_table = df.select(
         ['song_id', 'title', 'artist_id', 'year', 'duration']).dropDuplicates()
 
     # write songs table to parquet files partitioned by year and artist
+    # songs_table.write.partitionBy("year", "artist_id").mode(
+    #     "overwrite").parquet(os.path.join(output_data, 'songs'))
     songs_table.write.partitionBy("year", "artist_id").mode(
-        "overwrite").parquet(os.path.join(output_data, 'songs'))
+        "overwrite").parquet(output_data+ 'songs/')
 
     # extract columns to create artists table
     artists_table = df.select('artist_id', 'artist_name', 'artist_location',
@@ -60,8 +56,9 @@ def process_song_data(spark, input_data, output_data):
         .withColumnRenamed('artist_longitude', 'longitude').dropDuplicates()
 
     # write artists table to parquet files
-    artists_table.write.mode("overwrite").parquet(
-        os.path.join(output_data, 'artists'))
+    # artists_table.write.mode("overwrite").parquet(
+    #     os.path.join(output_data, 'artists'))
+    artists_table.write.mode("overwrite").parquet(output_data+ 'artists/')
 
 
 def process_log_data(spark, input_data, output_data):
@@ -71,9 +68,8 @@ def process_log_data(spark, input_data, output_data):
         - Write all dataframe into parquet files in folder 'data_output'
     """
     # get filepath to log data file
-    log_data = os.path.join(input_data, 'log-data', '*')
-    with zipfile.ZipFile("data/log-data.zip", "r") as zip_ref:
-        zip_ref.extractall("data/log-data")
+    # log_data = os.path.join(input_data, 'log-data', '*')
+    log_data = input_data + 'log_data/*/*/*events.json'
 #     log_data = "input_data/log-data/*/*/*events.json"
     # read log data file
     df = spark.read.json(log_data)
@@ -89,12 +85,9 @@ def process_log_data(spark, input_data, output_data):
         .withColumnRenamed('lastName', 'last_name').dropDuplicates()
 
     # write users table to parquet files
-    users_table.write.mode("overwrite").parquet(
-        os.path.join(output_data, 'users'))
-
-    # create timestamp column from original timestamp column
-    # get_timestamp = udf(lambda ts: str(int(int(ts/1000))))
-    # df = df.withColumn('timestamp', get_timestamp(df.ts))
+    # users_table.write.mode("overwrite").parquet(
+    #     os.path.join(output_data, 'users'))
+    users_table.write.mode("overwrite").parquet(output_data, 'users')
 
     # create datetime column from original timestamp column
     get_datetime = udf(lambda timestamp: datetime.fromtimestamp(
@@ -111,12 +104,15 @@ def process_log_data(spark, input_data, output_data):
         .withColumn('weekday', dayofweek('datetime')).dropDuplicates()
 
     # write time table to parquet files partitioned by year and month
+    # time_table.write.mode("overwrite").partitionBy("year", "month") \
+    #     .parquet(os.path.join(output_data, 'time'))
     time_table.write.mode("overwrite").partitionBy("year", "month") \
-        .parquet(os.path.join(output_data, 'time'))
+        .parquet(output_data+'time/')
 
     # read in song data to use for songplays table
-    song_df = spark.read.json(os.path.join(
-        input_data, 'song-data', 'song_data', '*', '*', '*'))
+    # song_df = spark.read.json(os.path.join(
+    #     input_data, 'song-data', '*', '*', '*'))
+    song_df = spark.read.json(input_data + 'song_data/*/*/*/*.json')
 
     # extract columns from joined song and log datasets to create songplays table
     """
@@ -149,8 +145,10 @@ def process_log_data(spark, input_data, output_data):
     """)
 
     # write songplays table to parquet files partitioned by year and month
-    songplays_table.write.partitionBy("year", "month").mode("overwrite").parquet(
-        os.path.join(output_data, 'songplays'))
+    # songplays_table.write.partitionBy("year", "month").mode("overwrite").parquet(
+    #     os.path.join(output_data, 'songplays'))
+    songplays_table.write.partitionBy("year", "month").mode("overwrite") \
+    .parquet(output_data+'songplays/')
 
 
 def main():
@@ -159,8 +157,10 @@ def main():
     """
     spark = create_spark_session()
     # for aws env
-    input_data = "s3a://udacity-dend-namhh/input"
-    output_data = "s3a://udacity-dend-namhh/output"
+    input_data = "s3a://udacity-dend/"
+    output_data = "s3a://udacity-dend-namhh/output/"
+    # input_data = "s3a://udacity-dend-namhh4/input/"
+    # output_data = "s3a://udacity-dend-namhh/output/"
     # for local
     # input_data = "data"
     # output_data = "data_output"
